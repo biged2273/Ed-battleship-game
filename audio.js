@@ -1,29 +1,23 @@
-/* Country shuffle, splashes, booms and two old guys running their mouths.
-   The band is synthesized in the browser; only the voice clips are files. */
+/* Boat radio, splashes, booms and two old guys running their mouths.
+   Music and voice lines are files; the sound effects are synthesized. */
 
 const Sound = (() => {
   let ctx = null;
-  let master = null, musicGain = null;
+  let master = null;
   let musicOn = true, running = false;
   let whistle = null;          // gain of the in-flight bomb whistle, cut short on impact
-  let timer = null, step = 0, nextTime = 0;
 
-  const BPM = 104;                    // lazy back-porch tempo
-  const STEP = 60 / BPM / 4;          // sixteenth note
-  const SWING = STEP * 0.32;          // shuffle: late off-beats
-  const LOOKAHEAD = 0.1;
-
-  // G - C - G - D, one bar each: the oldest progression on the lake
-  const ROOTS = [98.0, 130.81, 98.0, 146.83];    // G2 C3 G2 D3
-  const FIFTH = 1.4983;               // the "chick" note of the boom-chick
-  const CHORD = [0, 4, 7, 12];        // major triad + octave, strummed
-  // pedal-steel phrases in the major pentatonic of each chord
-  const LEAD = [
-    [12, 16, 19, 16, null, 14, 12, null],
-    [12, null, 16, 19, 16, null, 12, null],
-    [19, 16, 12, null, 14, 16, null, 12],
-    [16, 19, 21, 19, 16, null, 12, null],
+  /* Kevin MacLeod, incompetech.com - Creative Commons BY 3.0 */
+  const TRACKS = [
+    { file: 'music/bama-country.mp3', name: 'Bama Country' },
+    { file: 'music/hillbilly-swing.mp3', name: 'Hillbilly Swing' },
+    { file: 'music/corncob.mp3', name: 'Corncob' },
+    { file: 'music/still-pickin.mp3', name: 'Still Pickin\u2019' },
   ];
+  const MUSIC_VOL = 0.4;
+  const DUCK_VOL = 0.12;       // radio drops while somebody is talking
+  let trackIdx = 0;
+  let radio = null;
 
   function init() {
     if (ctx) return;
@@ -31,9 +25,6 @@ const Sound = (() => {
     master = ctx.createGain();
     master.gain.value = 0.9;
     master.connect(ctx.destination);
-    musicGain = ctx.createGain();
-    musicGain.gain.value = 0.32;
-    musicGain.connect(master);
   }
 
   /* ---------- one-shot voices ---------- */
@@ -54,107 +45,35 @@ const Sound = (() => {
     gain.gain.exponentialRampToValueAtTime(0.0001, t + a + d);
   }
 
-  /* brushed kick: soft thump, no techno click */
-  function kick(t, out) {
-    const o = ctx.createOscillator(), g = ctx.createGain();
-    o.type = 'sine';
-    o.frequency.setValueAtTime(96, t);
-    o.frequency.exponentialRampToValueAtTime(48, t + 0.09);
-    env(g, t, 0.006, 0.18, 0.7);
-    o.connect(g).connect(out); o.start(t); o.stop(t + 0.26);
-  }
-
-  /* brushes on the snare for the 2 and 4 backbeat */
-  function brush(t, out, accent) {
-    const s = noise(0.16), g = ctx.createGain(), f = ctx.createBiquadFilter();
-    f.type = 'bandpass'; f.frequency.value = accent ? 2400 : 3800; f.Q.value = 0.7;
-    env(g, t, accent ? 0.004 : 0.02, accent ? 0.14 : 0.09, accent ? 0.34 : 0.1);
-    s.connect(f).connect(g).connect(out); s.start(t); s.stop(t + 0.24);
-  }
-
-  /* upright bass: round, short, root-and-fifth boom-chick */
-  function bass(t, freq, out) {
-    const o = ctx.createOscillator(), g = ctx.createGain(), f = ctx.createBiquadFilter();
-    o.type = 'triangle'; o.frequency.value = freq;
-    f.type = 'lowpass'; f.frequency.setValueAtTime(420, t);
-    f.frequency.exponentialRampToValueAtTime(140, t + 0.26);
-    env(g, t, 0.012, 0.3, 0.5);
-    o.connect(f).connect(g).connect(out); o.start(t); o.stop(t + 0.4);
-  }
-
-  /* acoustic guitar chord, strings raked a few milliseconds apart */
-  function strum(t, root, out, up) {
-    const notes = up ? CHORD.slice().reverse() : CHORD;
-    notes.forEach((semi, i) => {
-      const o = ctx.createOscillator(), g = ctx.createGain(), f = ctx.createBiquadFilter();
-      const at = t + i * 0.012;
-      o.type = 'triangle';
-      o.frequency.value = root * 2 * Math.pow(2, semi / 12);
-      f.type = 'bandpass'; f.frequency.value = o.frequency.value * 2.1; f.Q.value = 1.4;
-      env(g, at, 0.004, 0.24, 0.085);
-      o.connect(f).connect(g).connect(out); o.start(at); o.stop(at + 0.36);
-    });
-  }
-
-  /* pedal steel: bends into the note and cries a little */
-  function steel(t, freq, out, dur = 0.42) {
-    const o = ctx.createOscillator(), g = ctx.createGain(), f = ctx.createBiquadFilter();
-    const vib = ctx.createOscillator(), vg = ctx.createGain();
-    o.type = 'sawtooth';
-    o.frequency.setValueAtTime(freq * 0.945, t);
-    o.frequency.exponentialRampToValueAtTime(freq, t + 0.1);
-    vib.type = 'sine'; vib.frequency.value = 5.2; vg.gain.value = freq * 0.006;
-    vib.connect(vg).connect(o.frequency);
-    f.type = 'lowpass'; f.frequency.value = freq * 3.2; f.Q.value = 3;
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.linearRampToValueAtTime(0.13, t + 0.06);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    o.connect(f).connect(g).connect(out);
-    o.start(t); vib.start(t); o.stop(t + dur + 0.05); vib.stop(t + dur + 0.05);
-  }
-
-  /* ---------- sequencer ---------- */
-
-  function scheduleStep(s, t) {
-    const bar = Math.floor(s / 16) % 4;
-    const i = s % 16;
-    const root = ROOTS[bar];
-    const swung = i % 2 ? t + SWING : t;   // shuffle the off-beats
-
-    if (i === 0 || i === 8) kick(t, musicGain);
-    if (i === 4 || i === 12) brush(t, musicGain, true);
-    if (i % 2 === 1) brush(swung, musicGain, false);
-    // boom-chick: root on the beat, fifth halfway through the bar
-    if (i === 0) bass(t, root, musicGain);
-    if (i === 8) bass(t, root * FIFTH, musicGain);
-    if (i === 4 || i === 12) strum(t, root, musicGain, i === 12);
-    const note = LEAD[bar][i / 2];
-    if (i % 2 === 0 && note != null) {
-      steel(swung, root * 2 * Math.pow(2, note / 12), musicGain, i === 14 ? 0.7 : 0.42);
-    }
-  }
-
-  function pump() {
-    while (nextTime < ctx.currentTime + LOOKAHEAD) {
-      scheduleStep(step, nextTime);
-      step = (step + 1) % 64;
-      nextTime += STEP;
-    }
-  }
+  /* ---------- the boat radio ---------- */
 
   function startMusic() {
     init();
     if (ctx.state === 'suspended') ctx.resume();
-    if (running || !musicOn) return;
+    if (!musicOn) return;
+    if (!radio) {
+      radio = new Audio(TRACKS[trackIdx].file);
+      radio.loop = true;
+      radio.volume = MUSIC_VOL;
+    }
     running = true;
-    step = 0;
-    nextTime = ctx.currentTime + 0.06;
-    timer = setInterval(pump, 25);
+    radio.play().catch(() => { running = false; });
   }
 
   function stopMusic() {
     running = false;
-    clearInterval(timer);
+    if (radio) radio.pause();
+  }
+
+  /* Flip to the next song on the radio; returns the new track name. */
+  function nextTrack() {
+    trackIdx = (trackIdx + 1) % TRACKS.length;
+    if (radio) {
+      radio.src = TRACKS[trackIdx].file;
+      radio.volume = MUSIC_VOL;
+      if (musicOn) { running = true; radio.play().catch(() => { running = false; }); }
+    }
+    return TRACKS[trackIdx].name;
   }
 
   /* ---------- game sfx ---------- */
@@ -316,7 +235,11 @@ const Sound = (() => {
     const a = new Audio(VOICE_DIR + file);
     if (playing) { playing.pause(); }
     playing = a;
-    return a.play().then(() => true).catch(() => false);
+    if (radio) radio.volume = DUCK_VOL;
+    const restore = () => { if (radio && playing === a) radio.volume = MUSIC_VOL; };
+    a.onended = restore;
+    a.onerror = restore;
+    return a.play().then(() => true).catch(() => { restore(); return false; });
   }
 
   let voices = [];
@@ -398,9 +321,14 @@ const Sound = (() => {
       stopMusic();
       if (playing) { playing.pause(); playing = null; }
       if ('speechSynthesis' in window) speechSynthesis.cancel();
+      if (radio) radio.volume = MUSIC_VOL;
     }
     return musicOn;
   }
 
-  return { init, startMusic, stopMusic, play, cutWhistle, smack, toggle, get on() { return musicOn; } };
+  return {
+    init, startMusic, stopMusic, nextTrack, play, cutWhistle, smack, toggle,
+    get on() { return musicOn; },
+    get track() { return TRACKS[trackIdx].name; },
+  };
 })();

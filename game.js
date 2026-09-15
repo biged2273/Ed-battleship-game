@@ -117,6 +117,9 @@ document.getElementById('reset-btn').onclick = () => location.reload();
 document.getElementById('sound-btn').onclick = e => {
   e.target.textContent = Sound.toggle() ? 'Sound: on' : 'Sound: off';
 };
+document.getElementById('track-btn').onclick = e => {
+  e.target.textContent = 'Radio: ' + Sound.nextTrack();
+};
 document.getElementById('rules-btn').onclick = () => document.getElementById('rules').classList.remove('hidden');
 document.getElementById('rules-close').onclick = () => document.getElementById('rules').classList.add('hidden');
 
