@@ -3,6 +3,7 @@
 
 const DISTANCES = [25, 50, 100, 150, 200, 250, 300];
 const MAX_FT = 330;
+const SWEEP_MS = 5200;      // one full left-to-right pass of the cast meter
 const HULL_HP = 5;
 
 const BOATS = [
@@ -142,6 +143,11 @@ function controlsHtml(title, inner) {
   el.controls.innerHTML = `<h3>${title}</h3>${inner}`;
 }
 
+function controlsTitle(title) {
+  const h = el.controls.querySelector('h3');
+  if (h) h.innerHTML = title;
+}
+
 /* ---------------- round flow ---------------- */
 
 function startRound() {
@@ -163,71 +169,70 @@ function startRound() {
       S.you.pos = +b.dataset.d;
       S.playerHistory.push(S.you.pos);
       log(`Round ${S.round}: you motor out to <b>${S.you.pos} ft</b> and cut the engine.`);
-      playerAimPhase();
+      playerCastPhase();
     };
   });
 }
 
-function playerAimPhase() {
+/* The whole skill of the game: a marker walks the distance scale, you stop it on them. */
+function playerCastPhase() {
   setPhase('Your cast');
   view = freshView('you');
+  view.marker = { ft: 0, armed: false };
   draw();
-  const row = DISTANCES.map(d =>
-    `<button class="dist-btn" data-d="${d}">${d} ft</button>`).join('');
-  controlsHtml('How far out do you think their pontoon is? Pick your aim.',
-    `<div class="dist-row">${row}</div>`);
-  el.controls.querySelectorAll('.dist-btn').forEach(b => {
-    b.onclick = () => playerMeterPhase(+b.dataset.d);
-  });
-}
 
-function playerMeterPhase(aim) {
-  view.aim = aim;
-  const spread = 34;
-  let running = true;
-  let stopped = null;
+  controlsHtml('Wind up and let it fly — then stop the cast on the distance you think they are sitting at.',
+    `<div class="dist-row"><button class="dist-btn stop-btn" id="stop">CAST (space)</button></div>`);
 
-  controlsHtml(`Aiming <b>${aim} ft</b> — stop the meter dead center for a clean cast.`,
-    `<div class="dist-row"><button class="dist-btn stop-btn" id="stop">CAST (stop the meter)</button></div>`);
+  const btn = document.getElementById('stop');
+  let t0 = null;
+  let running = false;
 
-  const t0 = performance.now();
-  const offsetAt = now => Math.sin(((now - t0) / 1000) * 3.6) * spread;
+  // slow, steady left-to-right sweep; it loops back to the dock if you never pull the trigger
+  const ftAt = now => ((now - t0) / SWEEP_MS % 1) * MAX_FT;
 
   function tick(now) {
     if (!running) return;
-    view.marker = { aim, off: offsetAt(now), spread };
+    view.marker = { ft: ftAt(now), armed: true };
     draw();
     requestAnimationFrame(tick);
   }
-  requestAnimationFrame(tick);
+
+  function startSweep() {
+    running = true;
+    t0 = performance.now();
+    btn.textContent = 'STOP THE CAST (space)';
+    controlsTitle('Stop the marker on their range — wherever it stops is exactly where the dynamite lands.');
+    setHotkey(stop);
+    requestAnimationFrame(tick);
+  }
 
   function stop() {
     if (!running) return;
     running = false;
     setHotkey(null);
-    // read the meter at the exact instant of the click, not at the last painted frame
-    stopped = offsetAt(performance.now());
-    const landing = clamp(Math.round(aim + stopped), 5, MAX_FT);
-    view.marker = { aim, off: stopped, spread, frozen: true };
+    // read the sweep at the exact instant of the press, not at the last painted frame
+    const landing = clamp(Math.round(ftAt(performance.now())), 0, MAX_FT);
+    view.marker = { ft: landing, armed: true, frozen: true };
     draw();
     el.controls.innerHTML = '<h3>Casting…</h3>';
-    resolvePlayerCast(aim, landing);
+    resolvePlayerCast(landing);
   }
 
-  document.getElementById('stop').onclick = stop;
-  setHotkey(stop);
+  btn.onclick = () => (running ? stop() : startSweep());
+  setHotkey(startSweep);
 }
 
 /* spacebar mirrors whatever timing button is live */
 let hotkey = null;
 function setHotkey(fn) { hotkey = fn; }
 window.addEventListener('keydown', e => {
-  if (e.code !== 'Space' || !hotkey) return;
+  if (e.code !== 'Space' || e.repeat || !hotkey) return;
   e.preventDefault();
   hotkey();
 });
 
-async function resolvePlayerCast(aim, landing) {
+async function resolvePlayerCast(landing) {
   const target = S.foe;
   S.lastPlayerLanding = landing;
   const wouldHit = Math.abs(landing - target.pos) <= target.boat.tol;
@@ -246,7 +251,8 @@ async function resolvePlayerCast(aim, landing) {
 
   if (defends) {
     target.cans--;
-    log(`🍺 <b>${target.crew}</b> pegged your dynamite mid-air with a cold one. It blew up over open water.`, 'def');
+    syncHud();
+    log(`🍺 <b>${target.crew}</b> pegged your dynamite mid-air with a cold one — it blew up over open water. ${target.cans} beers left on their deck.`, 'def');
   } else if (wouldHit) {
     target.hp--;
     log(`💥 <b>DIRECT HIT</b> at ${landing} ft — you blew a pontoon tube off the ${target.boat.name}. ${target.hp} hits left.`, 'hit');
@@ -312,8 +318,10 @@ async function foeTurn() {
   if (canThrow) {
     const btn = document.getElementById('defend');
     const throwCan = () => {
-      if (thrownAt != null) return;
+      if (thrownAt != null || S.you.cans <= 0) return;
       thrownAt = view.flight ? view.flight.t : -1;   // -1 = thrown before the cast even left the rod
+      S.you.cans--;                                  // the can leaves the cooler the instant you throw it
+      syncHud();
       btn.disabled = true;
       setHotkey(null);
     };
@@ -335,15 +343,14 @@ async function foeTurn() {
 
   setHotkey(null);
   const intercepted = thrownAt != null && thrownAt >= view.strikeZone[0] && thrownAt <= view.strikeZone[1];
-  if (thrownAt != null) S.you.cans--;
 
   if (intercepted) {
-    log(`🍺 <b>You smoked it out of the air.</b> The dynamite went off over the water and rained bluegill everywhere.`, 'def');
+    log(`🍺 <b>You smoked it out of the air.</b> The dynamite went off over the water and rained bluegill everywhere. ${S.you.cans} beers left in your cooler.`, 'def');
   } else if (thrownAt != null && !wouldHit) {
-    log(`You panic-threw a beer (${thrownAt < view.strikeZone[0] ? 'too early' : 'too late'}) — but their cast splashed wide at ${landing} ft anyway.`, 'miss');
+    log(`You panic-threw a beer (${thrownAt < view.strikeZone[0] ? 'too early' : 'too late'}) — but their cast splashed wide at ${landing} ft anyway. ${S.you.cans} beers left.`, 'miss');
   } else if (thrownAt != null) {
-    log(`💥 Your beer sailed ${thrownAt < view.strikeZone[0] ? 'under' : 'behind'} it. The dynamite hit your deck.`, 'hit');
     S.you.hp--;
+    log(`💥 Your beer sailed ${thrownAt < view.strikeZone[0] ? 'under' : 'behind'} it. The dynamite hit your deck — ${S.you.hp} hits left, ${S.you.cans} beers left.`, 'hit');
   } else if (wouldHit) {
     S.you.hp--;
     log(`💥 <b>They hit you</b> at ${landing} ft. Your ${S.you.boat.name} is taking water — ${S.you.hp} hits left.`, 'hit');
@@ -722,31 +729,41 @@ function drawBoom(b) {
   ctx.restore();
 }
 
+/* Cast meter: a marker sweeping the same distance scale the lake is drawn on. */
 function drawMeter(m) {
-  const y = 44;
-  const cx = W / 2, halfW = 250;
+  const y = H - 46;
+  const x0 = xFor(0), x1 = xFor(MAX_FT);
   ctx.save();
-  ctx.fillStyle = 'rgba(6,17,26,.75)';
-  roundRect(cx - halfW - 12, y - 22, halfW * 2 + 24, 46, 8); ctx.fill();
 
-  ctx.fillStyle = 'rgba(231,242,245,.25)';
-  ctx.fillRect(cx - halfW, y - 4, halfW * 2, 8);
-  ctx.fillStyle = '#1f7a4d';
-  ctx.fillRect(cx - 26, y - 8, 52, 16);
-  ctx.fillStyle = '#ffd25a';
-  ctx.fillRect(cx - 2, y - 12, 4, 24);
+  ctx.fillStyle = 'rgba(6,17,26,.82)';
+  roundRect(x0 - 26, y - 30, x1 - x0 + 52, 62, 8); ctx.fill();
 
-  const px = cx + (m.off / m.spread) * halfW;
-  ctx.fillStyle = m.frozen ? '#e7f2f5' : '#c8452d';
-  ctx.beginPath();
-  ctx.moveTo(px, y - 16); ctx.lineTo(px + 7, y - 26); ctx.lineTo(px - 7, y - 26);
-  ctx.closePath(); ctx.fill();
-  ctx.fillRect(px - 2, y - 16, 4, 32);
+  ctx.fillStyle = 'rgba(231,242,245,.18)';
+  ctx.fillRect(x0, y - 5, x1 - x0, 10);
 
-  ctx.font = 'bold 12px "Trebuchet MS"';
-  ctx.fillStyle = '#9fc0cd';
   ctx.textAlign = 'center';
-  ctx.fillText(`aim ${m.aim} ft   —   cast reads ${Math.round(m.aim + m.off)} ft`, cx, y + 34);
+  ctx.font = 'bold 11px "Trebuchet MS"';
+  DISTANCES.forEach(d => {
+    const x = xFor(d);
+    ctx.fillStyle = '#e7f2f5';
+    ctx.fillRect(x - 1.5, y - 12, 3, 24);
+    ctx.fillStyle = '#9fc0cd';
+    ctx.fillText(`${d}`, x, y + 26);
+  });
+
+  const px = xFor(m.ft);
+  if (m.armed) {
+    ctx.fillStyle = m.frozen ? '#ffd25a' : '#c8452d';
+    ctx.beginPath();
+    ctx.moveTo(px, y - 14); ctx.lineTo(px + 8, y - 26); ctx.lineTo(px - 8, y - 26);
+    ctx.closePath(); ctx.fill();
+    ctx.fillRect(px - 2, y - 14, 4, 28);
+  }
+
+  ctx.font = 'bold 13px "Trebuchet MS"';
+  ctx.fillStyle = m.frozen ? '#ffd25a' : '#e7f2f5';
+  ctx.textAlign = 'left';
+  ctx.fillText(m.armed ? `${Math.round(m.ft)} ft` : 'press CAST to start the sweep', x0 - 20, y - 18);
   ctx.restore();
 }
 
@@ -823,7 +840,8 @@ function weightedPick(items, weights) {
 
 /* idle water animation so the lake never looks frozen */
 (function idle() {
-  if (view && !view.flight && !view.marker && view.windUp == null) draw();
+  const sweeping = view && view.marker && view.marker.armed && !view.marker.frozen;
+  if (view && !view.flight && !sweeping && view.windUp == null) draw();
   requestAnimationFrame(idle);
 })();
 
