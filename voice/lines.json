@@ -1,0 +1,102 @@
+{
+  "youHit": [
+    {
+      "text": "Hell yeah brother!!",
+      "clip": "youHit-73f42751f7.mp3"
+    },
+    {
+      "text": "Get off my lake, Gary!",
+      "clip": "youHit-86e5d3bce6.mp3"
+    },
+    {
+      "text": "That one had your name on it, Dale!",
+      "clip": "youHit-0234e56369.mp3"
+    },
+    {
+      "text": "Boom goes the bait shop!",
+      "clip": "youHit-d7c4de3c05.mp3"
+    }
+  ],
+  "youMiss": [
+    {
+      "text": "Aw, come on, that was the wind.",
+      "clip": "youMiss-ae567d491b.mp3"
+    },
+    {
+      "text": "Dang it. Hand me another beer.",
+      "clip": "youMiss-8726003197.mp3"
+    },
+    {
+      "text": "I meant to do that. Warning shot.",
+      "clip": "youMiss-f24a84b3d6.mp3"
+    },
+    {
+      "text": "Rod slipped. Not my fault.",
+      "clip": "youMiss-ba153993dd.mp3"
+    }
+  ],
+  "foeHit": [
+    {
+      "text": "Gary says: sit down, son!",
+      "clip": "foeHit-481fdd9981.mp3"
+    },
+    {
+      "text": "Dale says: that is how you cast!",
+      "clip": "foeHit-f70a8535e0.mp3"
+    },
+    {
+      "text": "Gary says: tell your wife I said hi!",
+      "clip": "foeHit-9c49d3645e.mp3"
+    },
+    {
+      "text": "Dale says: we are just getting warmed up!",
+      "clip": "foeHit-5c0566e0a2.mp3"
+    }
+  ],
+  "foeMiss": [
+    {
+      "text": "Gary says: alright, alright, I was reeling.",
+      "clip": "foeMiss-7bc015458b.mp3"
+    },
+    {
+      "text": "Dale says: that one was a practice throw.",
+      "clip": "foeMiss-27b312b40e.mp3"
+    },
+    {
+      "text": "Gary says: sun was in my eyes.",
+      "clip": "foeMiss-7b58f5a535.mp3"
+    },
+    {
+      "text": "Dale says: lucky the lake is big.",
+      "clip": "foeMiss-d0b5251b07.mp3"
+    }
+  ],
+  "youDefend": [
+    {
+      "text": "Get that outta here!",
+      "clip": "youDefend-0e0dc2e24d.mp3"
+    },
+    {
+      "text": "Not today, Gary! Have a cold one!",
+      "clip": "youDefend-6028992eaf.mp3"
+    },
+    {
+      "text": "Beer can defense, baby!",
+      "clip": "youDefend-251845c9cd.mp3"
+    }
+  ],
+  "foeDefend": [
+    {
+      "text": "Gary says: get that outta here!",
+      "clip": "foeDefend-f813620a76.mp3"
+    },
+    {
+      "text": "Dale says: nice try, we got a whole cooler!",
+      "clip": "foeDefend-0726fd62e3.mp3"
+    },
+    {
+      "text": "Gary says: knocked it right out of the sky!",
+      "clip": "foeDefend-80965df66e.mp3"
+    }
+  ]
+}

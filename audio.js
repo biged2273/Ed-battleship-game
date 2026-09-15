@@ -275,6 +275,24 @@ const Sound = (() => {
     ],
   };
 
+  /* Pre-generated ElevenLabs clips (tools/generate_voices.py). Falls back to
+     the browser's robot voice when the manifest or a clip is unavailable. */
+  const VOICE_DIR = 'voice/';
+  let clips = null;
+  let playing = null;
+
+  fetch(VOICE_DIR + 'lines.json')
+    .then(r => (r.ok ? r.json() : null))
+    .then(j => { clips = j; })
+    .catch(() => { clips = null; });
+
+  function playClip(file) {
+    const a = new Audio(VOICE_DIR + file);
+    if (playing) { playing.pause(); }
+    playing = a;
+    return a.play().then(() => true).catch(() => false);
+  }
+
   let voices = [];
   if ('speechSynthesis' in window) {
     const load = () => { voices = speechSynthesis.getVoices(); };
@@ -333,10 +351,17 @@ const Sound = (() => {
   }
 
   function smack(kind) {
+    const who = kind.startsWith('foe') ? 'foe' : 'you';
+    const bank = clips && clips[kind];
+    if (bank && bank.length) {
+      const c = bank[Math.floor(Math.random() * bank.length)];
+      if (musicOn) playClip(c.clip).then(ok => { if (!ok) say(c.text, who); });
+      return c.text;
+    }
     const list = LINES[kind];
     if (!list) return null;
     const line = list[Math.floor(Math.random() * list.length)];
-    say(line, kind.startsWith('foe') ? 'foe' : 'you');
+    say(line, who);
     return line;
   }
 
@@ -345,6 +370,7 @@ const Sound = (() => {
     if (musicOn) { startMusic(); }
     else {
       stopMusic();
+      if (playing) { playing.pause(); playing = null; }
       if ('speechSynthesis' in window) speechSynthesis.cancel();
     }
     return musicOn;
