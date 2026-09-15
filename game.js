@@ -1,7 +1,7 @@
 /* Dynamite Lake - pontoon battleship vs. an AI opponent.
-   One rod, one stick of dynamite, seven anchor spots and a cooler full of defense. */
+   One rod, one stick of dynamite, four anchor spots and a cooler full of defense. */
 
-const DISTANCES = [25, 50, 100, 150, 200, 250, 300];
+const DISTANCES = [50, 100, 200, 300];
 const MAX_FT = 330;
 const SWEEP_MS = 5200;      // one full left-to-right pass of the cast meter
 const HULL_HP = 3;

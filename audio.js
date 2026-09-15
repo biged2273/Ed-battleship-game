@@ -1,5 +1,5 @@
-/* Honky-tonk techno, splashes, booms and two old guys running their mouths.
-   Everything is synthesized in the browser - no audio files to load. */
+/* Country shuffle, splashes, booms and two old guys running their mouths.
+   The band is synthesized in the browser; only the voice clips are files. */
 
 const Sound = (() => {
   let ctx = null;
@@ -8,17 +8,21 @@ const Sound = (() => {
   let whistle = null;          // gain of the in-flight bomb whistle, cut short on impact
   let timer = null, step = 0, nextTime = 0;
 
-  const BPM = 124;
+  const BPM = 104;                    // lazy back-porch tempo
   const STEP = 60 / BPM / 4;          // sixteenth note
+  const SWING = STEP * 0.32;          // shuffle: late off-beats
   const LOOKAHEAD = 0.1;
 
-  // G mixolydian-ish honky tonk: G - C - D - C, two bars each
-  const ROOTS = [98.0, 130.81, 146.83, 130.81];   // G2 C3 D3 C3
-  const TWANG = [
-    [0, 7, 12, 7, 16, 12, 7, 0],
-    [0, 4, 7, 12, 7, 4, 0, 4],
-    [0, 7, 11, 14, 11, 7, 0, 7],
-    [0, 4, 7, 12, 7, 4, 7, 4],
+  // G - C - G - D, one bar each: the oldest progression on the lake
+  const ROOTS = [98.0, 130.81, 98.0, 146.83];    // G2 C3 G2 D3
+  const FIFTH = 1.4983;               // the "chick" note of the boom-chick
+  const CHORD = [0, 4, 7, 12];        // major triad + octave, strummed
+  // pedal-steel phrases in the major pentatonic of each chord
+  const LEAD = [
+    [12, 16, 19, 16, null, 14, 12, null],
+    [12, null, 16, 19, 16, null, 12, null],
+    [19, 16, 12, null, 14, 16, null, 12],
+    [16, 19, 21, 19, 16, null, 12, null],
   ];
 
   function init() {
@@ -50,48 +54,63 @@ const Sound = (() => {
     gain.gain.exponentialRampToValueAtTime(0.0001, t + a + d);
   }
 
+  /* brushed kick: soft thump, no techno click */
   function kick(t, out) {
     const o = ctx.createOscillator(), g = ctx.createGain();
     o.type = 'sine';
-    o.frequency.setValueAtTime(130, t);
-    o.frequency.exponentialRampToValueAtTime(42, t + 0.11);
-    env(g, t, 0.002, 0.22, 1.0);
-    o.connect(g).connect(out); o.start(t); o.stop(t + 0.3);
+    o.frequency.setValueAtTime(96, t);
+    o.frequency.exponentialRampToValueAtTime(48, t + 0.09);
+    env(g, t, 0.006, 0.18, 0.7);
+    o.connect(g).connect(out); o.start(t); o.stop(t + 0.26);
   }
 
-  function hat(t, out, open) {
-    const s = noise(open ? 0.14 : 0.04), g = ctx.createGain(), f = ctx.createBiquadFilter();
-    f.type = 'highpass'; f.frequency.value = 7000;
-    env(g, t, 0.001, open ? 0.13 : 0.035, open ? 0.16 : 0.12);
-    s.connect(f).connect(g).connect(out); s.start(t); s.stop(t + 0.2);
+  /* brushes on the snare for the 2 and 4 backbeat */
+  function brush(t, out, accent) {
+    const s = noise(0.16), g = ctx.createGain(), f = ctx.createBiquadFilter();
+    f.type = 'bandpass'; f.frequency.value = accent ? 2400 : 3800; f.Q.value = 0.7;
+    env(g, t, accent ? 0.004 : 0.02, accent ? 0.14 : 0.09, accent ? 0.34 : 0.1);
+    s.connect(f).connect(g).connect(out); s.start(t); s.stop(t + 0.24);
   }
 
-  function clap(t, out) {
-    const s = noise(0.18), g = ctx.createGain(), f = ctx.createBiquadFilter();
-    f.type = 'bandpass'; f.frequency.value = 1700; f.Q.value = 1.1;
-    env(g, t, 0.003, 0.16, 0.5);
-    s.connect(f).connect(g).connect(out); s.start(t); s.stop(t + 0.25);
-  }
-
+  /* upright bass: round, short, root-and-fifth boom-chick */
   function bass(t, freq, out) {
     const o = ctx.createOscillator(), g = ctx.createGain(), f = ctx.createBiquadFilter();
-    o.type = 'sawtooth'; o.frequency.value = freq;
-    f.type = 'lowpass'; f.frequency.setValueAtTime(900, t);
-    f.frequency.exponentialRampToValueAtTime(220, t + 0.18);
-    env(g, t, 0.005, 0.2, 0.45);
-    o.connect(f).connect(g).connect(out); o.start(t); o.stop(t + 0.3);
+    o.type = 'triangle'; o.frequency.value = freq;
+    f.type = 'lowpass'; f.frequency.setValueAtTime(420, t);
+    f.frequency.exponentialRampToValueAtTime(140, t + 0.26);
+    env(g, t, 0.012, 0.3, 0.5);
+    o.connect(f).connect(g).connect(out); o.start(t); o.stop(t + 0.4);
   }
 
-  /* plucked, slightly detuned - the "banjo on a drum machine" sound */
-  function twang(t, freq, out) {
-    [0, 6].forEach((cents, i) => {
+  /* acoustic guitar chord, strings raked a few milliseconds apart */
+  function strum(t, root, out, up) {
+    const notes = up ? CHORD.slice().reverse() : CHORD;
+    notes.forEach((semi, i) => {
       const o = ctx.createOscillator(), g = ctx.createGain(), f = ctx.createBiquadFilter();
-      o.type = i ? 'triangle' : 'square';
-      o.frequency.value = freq * Math.pow(2, cents / 1200);
-      f.type = 'bandpass'; f.frequency.value = freq * 2.4; f.Q.value = 2.5;
-      env(g, t, 0.004, 0.22, i ? 0.14 : 0.1);
-      o.connect(f).connect(g).connect(out); o.start(t); o.stop(t + 0.35);
+      const at = t + i * 0.012;
+      o.type = 'triangle';
+      o.frequency.value = root * 2 * Math.pow(2, semi / 12);
+      f.type = 'bandpass'; f.frequency.value = o.frequency.value * 2.1; f.Q.value = 1.4;
+      env(g, at, 0.004, 0.24, 0.085);
+      o.connect(f).connect(g).connect(out); o.start(at); o.stop(at + 0.36);
     });
+  }
+
+  /* pedal steel: bends into the note and cries a little */
+  function steel(t, freq, out, dur = 0.42) {
+    const o = ctx.createOscillator(), g = ctx.createGain(), f = ctx.createBiquadFilter();
+    const vib = ctx.createOscillator(), vg = ctx.createGain();
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(freq * 0.945, t);
+    o.frequency.exponentialRampToValueAtTime(freq, t + 0.1);
+    vib.type = 'sine'; vib.frequency.value = 5.2; vg.gain.value = freq * 0.006;
+    vib.connect(vg).connect(o.frequency);
+    f.type = 'lowpass'; f.frequency.value = freq * 3.2; f.Q.value = 3;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.13, t + 0.06);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(f).connect(g).connect(out);
+    o.start(t); vib.start(t); o.stop(t + dur + 0.05); vib.stop(t + dur + 0.05);
   }
 
   /* ---------- sequencer ---------- */
@@ -100,12 +119,19 @@ const Sound = (() => {
     const bar = Math.floor(s / 16) % 4;
     const i = s % 16;
     const root = ROOTS[bar];
+    const swung = i % 2 ? t + SWING : t;   // shuffle the off-beats
 
-    if (i % 4 === 0) kick(t, musicGain);
-    if (i === 4 || i === 12) clap(t, musicGain);
-    if (i % 2 === 1) hat(t, musicGain, i === 7 || i === 15);
-    if (i % 2 === 0) bass(t, root * (i === 6 || i === 14 ? 1.5 : 1), musicGain);
-    if (i % 2 === 0) twang(t, root * 4 * Math.pow(2, TWANG[bar][(i / 2) % 8] / 12), musicGain);
+    if (i === 0 || i === 8) kick(t, musicGain);
+    if (i === 4 || i === 12) brush(t, musicGain, true);
+    if (i % 2 === 1) brush(swung, musicGain, false);
+    // boom-chick: root on the beat, fifth halfway through the bar
+    if (i === 0) bass(t, root, musicGain);
+    if (i === 8) bass(t, root * FIFTH, musicGain);
+    if (i === 4 || i === 12) strum(t, root, musicGain, i === 12);
+    const note = LEAD[bar][i / 2];
+    if (i % 2 === 0 && note != null) {
+      steel(swung, root * 2 * Math.pow(2, note / 12), musicGain, i === 14 ? 0.7 : 0.42);
+    }
   }
 
   function pump() {
