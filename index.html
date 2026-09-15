@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>DYNAMITE LAKE &mdash; Pontoon Battleship</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Dynamite Lake</h1>
+    <p class="tag">Two pontoons. Two coolers. One fishing rod with a stick of dynamite on the lure.</p>
+  </header>
+
+  <!-- ===== SETUP ===== -->
+  <section id="setup" class="panel">
+    <h2>Pick your rig, captain</h2>
+    <p class="hint">Bigger pontoon = bigger target, but you can haul a lot more beer (beer cans are your only defense).</p>
+    <div id="boat-picker" class="boat-picker"></div>
+    <button id="start-btn" class="big" disabled>Shove off</button>
+  </section>
+
+  <!-- ===== GAME ===== -->
+  <section id="game" class="hidden">
+    <div class="scoreboard">
+      <div class="score you">
+        <div class="who" id="you-name">You</div>
+        <div class="hull" id="you-hull"></div>
+        <div class="cans" id="you-cans"></div>
+      </div>
+      <div class="round">
+        <div class="round-num">ROUND <span id="round-num">1</span></div>
+        <div class="phase" id="phase-label">Positioning</div>
+      </div>
+      <div class="score them">
+        <div class="who" id="foe-name">Gary</div>
+        <div class="hull" id="foe-hull"></div>
+        <div class="cans" id="foe-cans"></div>
+      </div>
+    </div>
+
+    <canvas id="lake" width="960" height="420"></canvas>
+
+    <div id="controls" class="controls"></div>
+    <div id="log" class="log"></div>
+  </section>
+
+  <footer>
+    <button id="rules-btn" class="link">How to play</button>
+    <button id="reset-btn" class="link">New game</button>
+  </footer>
+</div>
+
+<div id="rules" class="modal hidden">
+  <div class="modal-box">
+    <h2>How to play</h2>
+    <ol>
+      <li><b>Anchor up.</b> Every round both boats pick a new distance from shore: 25, 50, 100, 150, 200, 250 or 300 feet. Your opponent never sees where you moved.</li>
+      <li><b>Cast.</b> Guess how far out their pontoon is, then stop the swinging power meter. Stop it dead center and the dynamite lands exactly where you aimed; sloppy timing and it splashes short or long.</li>
+      <li><b>Hit window.</b> A hit only counts if the dynamite lands within your target boat's length &mdash; big pontoons are far easier to clip than little ones.</li>
+      <li><b>Beer-can defense.</b> When dynamite is flying at <i>you</i>, chuck a beer can at it mid-flight. Time it while the lure is in the red strike zone and it blows up over open water. Miss and you waste a beer.</li>
+      <li><b>Splash talk.</b> After every cast you're told how far short or long you were &mdash; but they will have moved by the time you cast again.</li>
+      <li><b>Five hits</b> sinks a pontoon. Last cooler floating wins.</li>
+    </ol>
+    <button id="rules-close" class="big">Got it</button>
+  </div>
+</div>
+
+<script src="game.js"></script>
+</body>
+</html>
