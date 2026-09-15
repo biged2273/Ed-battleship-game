@@ -48,6 +48,7 @@
 
   <footer>
     <button id="rules-btn" class="link">How to play</button>
+    <button id="sound-btn" class="link">Sound: on</button>
     <button id="reset-btn" class="link">New game</button>
   </footer>
 </div>
@@ -59,14 +60,16 @@
       <li><b>Anchor up.</b> Every round both boats pick a new distance from shore: 25, 50, 100, 150, 200, 250 or 300 feet. Your opponent never sees where you moved.</li>
       <li><b>Cast.</b> Hit <b>CAST</b> (or <b>space</b>) and a marker sweeps left to right along the distance scale &mdash; 25, 50, 100, 150, 200, 250, 300 ft. Hit <b>STOP</b> at the range you think they are sitting at; the dynamite lands exactly where the marker stopped.</li>
       <li><b>Hit window.</b> A hit only counts if the dynamite lands within your target boat's length &mdash; big pontoons are far easier to clip than little ones.</li>
-      <li><b>Beer-can defense.</b> They take four seconds to wind up, then the dynamite flies at <i>you</i>. Chuck a beer can (click or <b>space</b>) while the lure is inside the red strike zone and it blows up over open water. Throw early or late and you just waste a beer.</li>
+      <li><b>Beer-can defense.</b> They take four seconds to wind up, then the dynamite flies at <i>you</i>. Chuck a beer can (click or <b>space</b>) while the lure is inside the red strike zone and the dynamite always detonates mid-air, well clear of your deck. Throw early or late and you just waste a beer.</li>
       <li><b>Splash talk.</b> After every cast you're told how far short or long you were &mdash; but they will have moved by the time you cast again.</li>
-      <li><b>Five hits</b> sinks a pontoon. Last cooler floating wins.</li>
+      <li><b>Three hits</b> sinks a pontoon. Every hit leaves craters, holes and smoke, and the boat rides lower &mdash; so you can see who is winning from across the lake.</li>
+      <li><b>Sound.</b> Honky-tonk techno on the boat radio and two old guys running their mouths after every cast. Kill it with <b>Sound: on/off</b> at the bottom.</li>
     </ol>
     <button id="rules-close" class="big">Got it</button>
   </div>
 </div>
 
+<script src="audio.js"></script>
 <script src="game.js"></script>
 </body>
 </html>

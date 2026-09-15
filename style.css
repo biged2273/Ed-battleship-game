@@ -143,6 +143,8 @@ canvas {
 .log .miss { color: #9fc0cd; }
 .log .def { color: var(--beer); }
 .log .big-news { color: var(--sun); font-weight: bold; }
+.log .talk { color: #e2c08a; font-style: italic; }
+.log .talk::before { content: "🗣 "; }
 
 footer { text-align: center; margin-top: 14px; display: flex; gap: 18px; justify-content: center; }
 

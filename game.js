@@ -4,7 +4,7 @@
 const DISTANCES = [25, 50, 100, 150, 200, 250, 300];
 const MAX_FT = 330;
 const SWEEP_MS = 5200;      // one full left-to-right pass of the cast meter
-const HULL_HP = 5;
+const HULL_HP = 3;
 
 const BOATS = [
   { id: 'skiff',  name: 'Minnow Junior', hullFt: 14, tol: 9,  cans: 3, blurb: 'Two guys, one cooler, zero shade.' },
@@ -100,6 +100,7 @@ function buildPicker() {
 }
 
 el.start.onclick = () => {
+  Sound.startMusic();
   S = newState(pickedBoat);
   el.setup.classList.add('hidden');
   el.game.classList.remove('hidden');
@@ -112,6 +113,9 @@ el.start.onclick = () => {
 };
 
 document.getElementById('reset-btn').onclick = () => location.reload();
+document.getElementById('sound-btn').onclick = e => {
+  e.target.textContent = Sound.toggle() ? 'Sound: on' : 'Sound: off';
+};
 document.getElementById('rules-btn').onclick = () => document.getElementById('rules').classList.remove('hidden');
 document.getElementById('rules-close').onclick = () => document.getElementById('rules').classList.add('hidden');
 
@@ -130,6 +134,7 @@ function hullBar(hp) {
 }
 
 function log(text, cls) {
+  if (!text) return;
   const p = document.createElement('p');
   if (cls) p.className = cls;
   p.innerHTML = text;
@@ -243,6 +248,7 @@ async function resolvePlayerCast(landing) {
 
   view.showTarget = true;
   view.targetDist = target.pos;
+  Sound.play('cast');
   await flyCast({
     fromX: CASTER_X, toFt: landing,
     intercept: defends ? 0.62 : null,
@@ -252,13 +258,18 @@ async function resolvePlayerCast(landing) {
   if (defends) {
     target.cans--;
     syncHud();
-    log(`🍺 <b>${target.crew}</b> pegged your dynamite mid-air with a cold one — it blew up over open water. ${target.cans} beers left on their deck.`, 'def');
+    log(`🍺 <b>${target.crew}</b> pegged your dynamite mid-air with a cold one — it blew up over open water, nowhere near their deck. ${target.cans} beers left on their boat.`, 'def');
+    log(Sound.smack('foeDefend'), 'talk');
   } else if (wouldHit) {
     target.hp--;
+    syncHud();
+    await cheer();
     log(`💥 <b>DIRECT HIT</b> at ${landing} ft — you blew a pontoon tube off the ${target.boat.name}. ${target.hp} hits left.`, 'hit');
+    log(Sound.smack('youHit'), 'talk');
   } else {
     const d = landing - target.pos;
     log(`Splash at ${landing} ft — <b>${Math.abs(d)} ft ${d > 0 ? 'long' : 'short'}</b>. They were sitting at ${target.pos} ft. ${pick(FOE_TAUNTS)}`, 'miss');
+    log(Sound.smack('youMiss'), 'talk');
   }
   syncHud();
 
@@ -320,6 +331,7 @@ async function foeTurn() {
     const throwCan = () => {
       if (thrownAt != null || S.you.cans <= 0) return;
       thrownAt = view.flight ? view.flight.t : -1;   // -1 = thrown before the cast even left the rod
+      Sound.play('can');
       S.you.cans--;                                  // the can leaves the cooler the instant you throw it
       syncHud();
       btn.disabled = true;
@@ -345,18 +357,23 @@ async function foeTurn() {
   const intercepted = thrownAt != null && thrownAt >= view.strikeZone[0] && thrownAt <= view.strikeZone[1];
 
   if (intercepted) {
-    log(`🍺 <b>You smoked it out of the air.</b> The dynamite went off over the water and rained bluegill everywhere. ${S.you.cans} beers left in your cooler.`, 'def');
+    log(`🍺 <b>You smoked it out of the air.</b> The dynamite went off way out over open water — not a scratch on your deck. ${S.you.cans} beers left in your cooler.`, 'def');
+    log(Sound.smack('youDefend'), 'talk');
   } else if (thrownAt != null && !wouldHit) {
     log(`You panic-threw a beer (${thrownAt < view.strikeZone[0] ? 'too early' : 'too late'}) — but their cast splashed wide at ${landing} ft anyway. ${S.you.cans} beers left.`, 'miss');
+    log(Sound.smack('foeMiss'), 'talk');
   } else if (thrownAt != null) {
     S.you.hp--;
     log(`💥 Your beer sailed ${thrownAt < view.strikeZone[0] ? 'under' : 'behind'} it. The dynamite hit your deck — ${S.you.hp} hits left, ${S.you.cans} beers left.`, 'hit');
+    log(Sound.smack('foeHit'), 'talk');
   } else if (wouldHit) {
     S.you.hp--;
     log(`💥 <b>They hit you</b> at ${landing} ft. Your ${S.you.boat.name} is taking water — ${S.you.hp} hits left.`, 'hit');
+    log(Sound.smack('foeHit'), 'talk');
   } else {
     const d = landing - S.you.pos;
     log(`Their dynamite splashes at ${landing} ft, <b>${Math.abs(d)} ft ${d > 0 ? 'past' : 'short of'}</b> you. Beers all around.`, 'miss');
+    log(Sound.smack('foeMiss'), 'talk');
   }
   syncHud();
 
@@ -407,8 +424,7 @@ async function flyCast(opts) {
 
     // AI beer-can interception at a fixed point in the flight
     if (opts.intercept != null && t >= opts.intercept && !boomAt) {
-      boomAt = { x, y };
-      view.boom = { x, y, t0: performance.now(), beer: true };
+      boomAt = safeBoom(x, y, opts.defenderFt);
     }
     if (opts.watchThrow) {
       const th = opts.watchThrow();
@@ -422,8 +438,7 @@ async function flyCast(opts) {
         view.beer.done = bt >= 1;
         const inZone = th >= opts.strikeZone[0] && th <= opts.strikeZone[1];
         if (view.beer.done && inZone && !boomAt) {
-          boomAt = { x, y };
-          view.boom = { x, y, t0: performance.now(), beer: true };
+          boomAt = safeBoom(x, y, opts.defenderFt);
         }
       }
     }
@@ -439,12 +454,34 @@ async function flyCast(opts) {
   else await splash(toX);
 }
 
+/* A can that connects always detonates the dynamite out over open water,
+   clear of the deck it was aimed at. */
+function safeBoom(x, y, defenderFt) {
+  const deckX = xFor(defenderFt);
+  const dir = Math.sign(deckX - CASTER_X) || 1;
+  const bx = dir > 0 ? Math.min(x, deckX - 90) : Math.max(x, deckX + 90);
+  const by = Math.min(y, WATER_Y - 90);
+  Sound.play('can');
+  view.boom = { x: bx, y: by, beer: true };
+  return { x: bx, y: by };
+}
+
 function tolOf(opts) {
   const side = view.caster === 'you' ? S.foe : S.you;
   return side.boat.tol;
 }
 
+/* HELL YEAH BROTHER!!! - fires on every hit you land. */
+async function cheer() {
+  Sound.play('cheer');
+  view.cheer = { t: 0 };
+  await animate(1400, t => { view.cheer.t = t; draw(); });
+  view.cheer = null;
+  draw();
+}
+
 async function burst(x, y) {
+  Sound.play('boom');
   view.boom = { x, y, r: 0 };
   await animate(700, t => { view.boom.r = 12 + t * 70; view.boom.fade = 1 - t; draw(); });
   view.boom = null;
@@ -452,6 +489,7 @@ async function burst(x, y) {
 }
 
 async function splash(x) {
+  Sound.play('splash');
   view.splash = { x, r: 0 };
   await animate(600, t => { view.splash.r = t * 34; view.splash.fade = 1 - t; draw(); });
   view.splash = null;
@@ -472,13 +510,13 @@ function draw() {
   drawWater();
 
   if (view.showTarget && view.targetDist != null) {
-    drawBoat(xFor(view.targetDist), targetSide.boat, -1, targetSide === S.you);
+    drawBoat(xFor(view.targetDist), targetSide, -1, targetSide === S.you);
     label(xFor(view.targetDist), WATER_Y - 108, `${view.targetDist} ft`);
   } else {
     drawFog();
   }
 
-  drawBoat(CASTER_X, casterSide.boat, 1, casterSide === S.you, true);
+  drawBoat(CASTER_X, casterSide, 1, casterSide === S.you, true);
   label(CASTER_X, WATER_Y - 112, view.caster === 'you' ? 'YOU' : `${S.foe.crew}`);
 
   if (view.flight) drawFlight(view.flight);
@@ -486,6 +524,7 @@ function draw() {
   if (view.splash) drawSplash(view.splash);
   if (view.boom) drawBoom(view.boom);
   if (view.marker) drawMeter(view.marker);
+  if (view.cheer) drawCheer(view.cheer.t);
   if (view.strikeZone && (view.flight || view.windUp != null)) drawZone(view.flight ? view.flight.t : 0, view.strikeZone);
   if (view.windUp != null) drawWindUp(view.windUp);
 }
@@ -573,15 +612,22 @@ function label(x, y, text) {
   ctx.restore();
 }
 
-/* A pontoon boat, side-on, crewed by two gentlemen of a certain age. */
-function drawBoat(x, boat, facing, isPlayer, withRod) {
+/* A pontoon boat, side-on, crewed by two gentlemen of a certain age.
+   The more dynamite it has eaten, the lower and uglier it rides. */
+function drawBoat(x, side, facing, isPlayer, withRod) {
+  const boat = side.boat ? side.boat : side;
+  const hp = side.hp != null ? side.hp : HULL_HP;
+  const dmg = clamp((HULL_HP - hp) / HULL_HP, 0, 1);   // 0 = pristine, 1 = going down
   const s = boat.hullFt / 20;          // visual scale from hull length
   const bw = 96 * s, bh = 26 * s;
-  const y = WATER_Y - 10;
-  const bob = Math.sin(performance.now() / 700 + x) * 2;
+  const going = view.sinking === side ? (view.sinkT || 0) : 0;
+  const y = WATER_Y - 10 + dmg * 16 + going * 90;   // settles into the water as it takes hits
+  const bob = Math.sin(performance.now() / 700 + x) * (2 + dmg * 2);
 
   ctx.save();
+  ctx.globalAlpha = 1 - going * 0.55;
   ctx.translate(x, y + bob);
+  ctx.rotate(facing * (dmg * 0.16 + going * 0.5));   // starts listing, then goes over
   ctx.scale(facing, 1);
 
   // pontoon tubes
@@ -622,9 +668,12 @@ function drawBoat(x, boat, facing, isPlayer, withRod) {
   drawGuy(-8, -30, '#e8d9b0', '#c0392b');
   drawGuy(bw / 2 - 22, -30, '#cfd6d8', '#2f6fa8');
 
-  if (withRod) drawRod(bw / 2 - 18, -40);
+  if (withRod && dmg < 1) drawRod(bw / 2 - 18, -40);
 
+  drawDamage(bw, dmg);
   ctx.restore();
+
+  if (dmg > 0) drawSmoke(x, y + bob - 40, dmg);
 
   // reflection
   ctx.save();
@@ -633,6 +682,52 @@ function drawBoat(x, boat, facing, isPlayer, withRod) {
   ctx.scale(facing, -0.5);
   ctx.fillStyle = '#e7f2f5';
   roundRect(-bw / 2, -18, bw, 20, 6); ctx.fill();
+  ctx.restore();
+}
+
+/* Blown-off rail, scorched deck and a hole in a pontoon tube per hit taken. */
+function drawDamage(bw, dmg) {
+  const hits = Math.round(dmg * HULL_HP);
+  if (!hits) return;
+  ctx.save();
+  for (let i = 0; i < hits; i++) {
+    const hx = -bw / 2 + 14 + (i * bw) / (HULL_HP + 0.5);
+    // charred blast crater on the deck
+    ctx.fillStyle = '#21140f';
+    ctx.beginPath(); ctx.ellipse(hx, -16, 9, 6, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = 'rgba(200,69,45,.55)';
+    ctx.beginPath(); ctx.ellipse(hx, -16, 5, 3, 0, 0, 7); ctx.fill();
+    // punched-through pontoon tube
+    ctx.fillStyle = '#10222b';
+    ctx.beginPath(); ctx.arc(hx + 4, 1, 4.5, 0, 7); ctx.fill();
+    // snapped rail post
+    ctx.strokeStyle = 'rgba(216,227,231,.35)';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(hx, -18); ctx.lineTo(hx + 5, -26); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawSmoke(x, y, dmg) {
+  const t = performance.now() / 1000;
+  ctx.save();
+  const puffs = 4 + Math.round(dmg * 10);
+  for (let i = 0; i < puffs; i++) {
+    const p = ((t * 0.4 + i / puffs) % 1);
+    ctx.globalAlpha = (1 - p) * (0.35 + dmg * 0.5);
+    ctx.fillStyle = i % 3 ? '#93a2a9' : '#39444a';
+    ctx.beginPath();
+    ctx.arc(x + Math.sin(p * 6 + i) * 12, y - p * 90, 6 + p * 20, 0, 7);
+    ctx.fill();
+  }
+  // fire licking out of the blast hole
+  for (let i = 0; i < 3; i++) {
+    ctx.globalAlpha = 0.5 + Math.random() * 0.3;
+    ctx.fillStyle = i ? '#ff9c3a' : '#ffe08a';
+    ctx.beginPath();
+    ctx.arc(x + (Math.random() - .5) * 12, y + 26 - Math.random() * 10, 3 + Math.random() * 5 * dmg, 0, 7);
+    ctx.fill();
+  }
   ctx.restore();
 }
 
@@ -767,6 +862,49 @@ function drawMeter(m) {
   ctx.restore();
 }
 
+/* HELL YEAH BROTHER!!! */
+function drawCheer(t) {
+  const pop = t < 0.18 ? t / 0.18 : 1;
+  const out = t > 0.82 ? 1 - (t - 0.82) / 0.18 : 1;
+  const scale = 0.6 + pop * 0.45 + Math.sin(t * 22) * 0.02;
+  ctx.save();
+  ctx.globalAlpha = out;
+  ctx.translate(W / 2, 128);
+  ctx.scale(scale, scale);
+
+  // starburst
+  ctx.fillStyle = '#ffd25a';
+  ctx.beginPath();
+  for (let i = 0; i < 24; i++) {
+    const a = (i / 24) * Math.PI * 2 + t * 1.6;
+    const r = i % 2 ? 150 : 250;
+    ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r * 0.42);
+  }
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#c8452d';
+  ctx.beginPath();
+  for (let i = 0; i < 24; i++) {
+    const a = (i / 24) * Math.PI * 2 - t * 1.6;
+    const r = i % 2 ? 120 : 210;
+    ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r * 0.42);
+  }
+  ctx.closePath(); ctx.fill();
+
+  ctx.textAlign = 'center';
+  ctx.rotate(-0.05);
+  ctx.font = 'italic bold 46px "Trebuchet MS"';
+  ctx.lineWidth = 8;
+  ctx.strokeStyle = '#2b1206';
+  ctx.strokeText('HELL YEAH', 0, -4);
+  ctx.fillStyle = '#fff3c4';
+  ctx.fillText('HELL YEAH', 0, -4);
+  ctx.font = 'italic bold 40px "Trebuchet MS"';
+  ctx.strokeText('BROTHER!!!', 0, 38);
+  ctx.fillStyle = '#ffd25a';
+  ctx.fillText('BROTHER!!!', 0, 38);
+  ctx.restore();
+}
+
 function drawWindUp(left) {
   ctx.save();
   ctx.textAlign = 'center';
@@ -812,15 +950,25 @@ function roundRect(x, y, w, h, r) {
 
 /* ---------------- end ---------------- */
 
-function endGame(playerWon) {
+async function endGame(playerWon) {
   S.over = true;
   setPhase(playerWon ? 'You win' : 'You sank');
+  Sound.play('sink');
+  await sinkBoat(playerWon ? S.foe : S.you);
   if (playerWon) {
     log(`🎆 <b>The ${S.foe.boat.name} is going down.</b> ${S.foe.crew} are treading water, beers held high. You win Dynamite Lake.`, 'big-news');
   } else {
     log(`🌊 <b>Your ${S.you.boat.name} is on the bottom.</b> Gary salutes you with a warm can of light beer.`, 'big-news');
   }
   controlsHtml('Game over', `<div class="dist-row"><button class="dist-btn stop-btn" onclick="location.reload()">Rematch</button></div>`);
+}
+
+/* The loser slides under, bow first, beers held high. */
+async function sinkBoat(side) {
+  view.showTarget = true;
+  view.targetDist = side.pos;
+  view.sinking = side;
+  await animate(2600, t => { view.sinkT = t; draw(); });
 }
 
 /* ---------------- utils ---------------- */
