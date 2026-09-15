@@ -5,6 +5,7 @@ const Sound = (() => {
   let ctx = null;
   let master = null, musicGain = null;
   let musicOn = true, running = false;
+  let whistle = null;          // gain of the in-flight bomb whistle, cut short on impact
   let timer = null, step = 0, nextTime = 0;
 
   const BPM = 124;
@@ -133,12 +134,46 @@ const Sound = (() => {
   /* ---------- game sfx ---------- */
 
   const sfx = {
-    cast(t) {   // rod whip
+    cast(t, dur) {   // rod whip, then the falling-bomb whistle all the way down
       const s = noise(0.25), g = ctx.createGain(), f = ctx.createBiquadFilter();
       f.type = 'bandpass'; f.frequency.setValueAtTime(600, t);
       f.frequency.exponentialRampToValueAtTime(3600, t + 0.22); f.Q.value = 3;
       env(g, t, 0.01, 0.22, 0.35);
       s.connect(f).connect(g).connect(master); s.start(t); s.stop(t + 0.3);
+      sfx.incoming(t + 0.14, dur);
+    },
+    incoming(t, dur = 1.5) {   // the classic dropping-bomb whistle
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      whistle = g;
+      const vib = ctx.createOscillator(), vg = ctx.createGain();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(1500, t);
+      o.frequency.exponentialRampToValueAtTime(190, t + dur);
+      vib.type = 'sine'; vib.frequency.value = 5.5; vg.gain.value = 26;
+      vib.connect(vg).connect(o.frequency);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.3, t + 0.12);
+      g.gain.setValueAtTime(0.3, t + dur - 0.25);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(g).connect(master);
+      o.start(t); vib.start(t); o.stop(t + dur); vib.stop(t + dur);
+    },
+    explode(t) {   // dynamite going off: crack, body, and a rolling tail
+      sfx.boom(t);
+      const c = noise(0.2), cg = ctx.createGain(), cf = ctx.createBiquadFilter();
+      cf.type = 'highpass'; cf.frequency.value = 1200;
+      env(cg, t, 0.001, 0.18, 0.8);
+      c.connect(cf).connect(cg).connect(master); c.start(t); c.stop(t + 0.25);
+      const r = noise(1.8), rg = ctx.createGain(), rf = ctx.createBiquadFilter();
+      rf.type = 'lowpass'; rf.frequency.setValueAtTime(700, t);
+      rf.frequency.exponentialRampToValueAtTime(90, t + 1.6);
+      env(rg, t + 0.05, 0.05, 1.6, 0.5);
+      r.connect(rf).connect(rg).connect(master); r.start(t); r.stop(t + 1.9);
+      const o = ctx.createOscillator(), og = ctx.createGain();
+      o.type = 'triangle';
+      o.frequency.setValueAtTime(140, t); o.frequency.exponentialRampToValueAtTime(22, t + 0.9);
+      env(og, t, 0.002, 0.9, 0.8);
+      o.connect(og).connect(master); o.start(t); o.stop(t + 1);
     },
     boom(t) {
       const s = noise(1.0), g = ctx.createGain(), f = ctx.createBiquadFilter();
@@ -185,10 +220,20 @@ const Sound = (() => {
     },
   };
 
-  function play(name) {
+  /* Kill the whistle the moment the dynamite stops existing. */
+  function cutWhistle() {
+    if (!whistle || !ctx) return;
+    const t = ctx.currentTime;
+    whistle.gain.cancelScheduledValues(t);
+    whistle.gain.setValueAtTime(Math.max(0.0001, whistle.gain.value), t);
+    whistle.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+    whistle = null;
+  }
+
+  function play(name, ...args) {
     if (!musicOn || !ctx) return;
     const f = sfx[name];
-    if (f) f(ctx.currentTime);
+    if (f) f(ctx.currentTime, ...args);
   }
 
   /* ---------- smack talk ---------- */
@@ -219,12 +264,14 @@ const Sound = (() => {
       'Dale says: lucky the lake is big.',
     ],
     youDefend: [
+      'Get that outta here!',
       'Not today, Gary! Have a cold one!',
       'Beer can defense, baby!',
     ],
     foeDefend: [
-      'Gary says: nice try, we got a whole cooler!',
-      'Dale says: knocked it right out of the sky!',
+      'Gary says: get that outta here!',
+      'Dale says: nice try, we got a whole cooler!',
+      'Gary says: knocked it right out of the sky!',
     ],
   };
 
@@ -235,17 +282,52 @@ const Sound = (() => {
     speechSynthesis.onvoiceschanged = load;
   }
 
-  /* who: 'you' | 'foe' - two different grizzled voices */
+  const MALE = /david|mark|guy|fred|alex|daniel|george|james|aaron|arthur|tom|rishi|male|man/i;
+  const FEMALE = /zira|samantha|victoria|karen|moira|tessa|fiona|susan|hazel|linda|catherine|eva|amelie|female|woman|girl|allison|ava|nicky|serena|kathy|princess/i;
+
+  /* Pick the two deepest-sounding male English voices we can find. */
+  function pickVoices() {
+    const en = voices.filter(v => /^en/i.test(v.lang) && !FEMALE.test(v.name));
+    const pool = en.length ? en : voices.filter(v => !FEMALE.test(v.name));
+    const men = pool.filter(v => MALE.test(v.name));
+    const list = men.length ? men : pool;
+    // an en-US voice drawls better than en-GB
+    list.sort((a, b) => (/en[-_]US/i.test(b.lang) ? 1 : 0) - (/en[-_]US/i.test(a.lang) ? 1 : 0));
+    return list;
+  }
+
+  /* Beat the flat robot delivery into something closer to a lake-county drawl. */
+  function drawl(text) {
+    return text
+      .replace(/\bgoing to\b/gi, 'fixin\u2019 ta')
+      .replace(/\bI am\b/g, 'I\u2019m')
+      .replace(/\byou all\b/gi, 'y\u2019all')
+      .replace(/\byou\b/gi, 'yew')
+      .replace(/\byour\b/gi, 'yer')
+      .replace(/\bmy\b/gi, 'mah')
+      .replace(/\bthat\b/gi, 'thayut')
+      .replace(/\bI\b/g, 'Ah')
+      .replace(/\bthe\b/gi, 'th\u2019')
+      .replace(/\bjust\b/gi, 'jus\u2019')
+      .replace(/\bwas\b/gi, 'wuz')
+      .replace(/\bboy\b/gi, 'bawh')
+      .replace(/\bright\b/gi, 'rahght')
+      .replace(/\bnice\b/gi, 'nahce')
+      .replace(/\bmy lake\b/gi, 'mah layke')
+      .replace(/ing\b/g, 'in\u2019')
+      .replace(/!+/g, () => Math.random() < 0.4 ? ', buddy!' : '!');
+  }
+
+  /* who: 'you' | 'foe' - two different grizzled southern voices */
   function say(text, who) {
     if (!musicOn || !('speechSynthesis' in window)) return;
-    const u = new SpeechSynthesisUtterance(text.replace(/^(Gary|Dale) says: /, ''));
-    u.rate = 0.95;
-    u.pitch = who === 'foe' ? 0.6 : 0.8;
+    const line = drawl(text.replace(/^(Gary|Dale) says: /, ''));
+    const u = new SpeechSynthesisUtterance(line);
+    u.rate = who === 'foe' ? 0.78 : 0.84;      // slow enough to sound unhurried
+    u.pitch = who === 'foe' ? 0.35 : 0.5;      // gravel, not chipmunk
     u.volume = 1;
-    if (voices.length) {
-      const male = voices.filter(v => /en/i.test(v.lang));
-      if (male.length) u.voice = male[who === 'foe' ? male.length - 1 : 0];
-    }
+    const list = pickVoices();
+    if (list.length) u.voice = list[who === 'foe' ? Math.min(1, list.length - 1) : 0];
     speechSynthesis.cancel();
     speechSynthesis.speak(u);
   }
@@ -268,5 +350,5 @@ const Sound = (() => {
     return musicOn;
   }
 
-  return { init, startMusic, stopMusic, play, smack, toggle, get on() { return musicOn; } };
+  return { init, startMusic, stopMusic, play, cutWhistle, smack, toggle, get on() { return musicOn; } };
 })();

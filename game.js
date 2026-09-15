@@ -5,11 +5,12 @@ const DISTANCES = [25, 50, 100, 150, 200, 250, 300];
 const MAX_FT = 330;
 const SWEEP_MS = 5200;      // one full left-to-right pass of the cast meter
 const HULL_HP = 3;
+const BEER_FLIGHT = 0.1;    // share of the cast's flight a thrown can needs to reach it
 
 const BOATS = [
-  { id: 'skiff',  name: 'Minnow Junior', hullFt: 14, tol: 9,  cans: 3, blurb: 'Two guys, one cooler, zero shade.' },
-  { id: 'cruise', name: 'Lake Loafer',    hullFt: 20, tol: 14, cans: 5, blurb: 'Bimini top, radio stuck on classic rock.' },
-  { id: 'barge',  name: 'Beer Barge', hullFt: 28, tol: 20, cans: 8, blurb: 'Grill on deck, two coolers, handles like a dock.' },
+  { id: 'skiff',  name: 'Minnow Junior', hullFt: 14, tol: 9,  cans: 2, blurb: 'Two guys, one cooler, zero shade.' },
+  { id: 'cruise', name: 'Lake Loafer',    hullFt: 20, tol: 14, cans: 3, blurb: 'Bimini top, radio stuck on classic rock.' },
+  { id: 'barge',  name: 'Beer Barge', hullFt: 28, tol: 20, cans: 4, blurb: 'Grill on deck, two coolers, handles like a dock.' },
 ];
 
 const FOE_TAUNTS = [
@@ -248,7 +249,8 @@ async function resolvePlayerCast(landing) {
 
   view.showTarget = true;
   view.targetDist = target.pos;
-  Sound.play('cast');
+  Sound.play('cast', 1.5);
+
   await flyCast({
     fromX: CASTER_X, toFt: landing,
     intercept: defends ? 0.62 : null,
@@ -341,9 +343,10 @@ async function foeTurn() {
     setHotkey(throwCan);
   }
 
-  view.strikeZone = [0.3, 0.72];
+  view.strikeZone = [0.25, 0.6];
   await windUp(4);
 
+  Sound.play('cast', 2.4);
   await flyCast({
     duration: 2400,
     fromX: CASTER_X, toFt: landing,
@@ -387,13 +390,15 @@ async function foeTurn() {
 
 function pause(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+/* step() may return true to cut the animation short (a cast that gets blown up
+   never finishes its flight). */
 function animate(duration, step) {
   return new Promise(res => {
     const t0 = performance.now();
     (function f(now) {
       const t = Math.min(1, (now - t0) / duration);
-      step(t);
-      if (t < 1) requestAnimationFrame(f); else res();
+      const abort = step(t);
+      if (t < 1 && !abort) requestAnimationFrame(f); else res();
     })(performance.now());
   });
 }
@@ -426,27 +431,30 @@ async function flyCast(opts) {
     if (opts.intercept != null && t >= opts.intercept && !boomAt) {
       boomAt = safeBoom(x, y, opts.defenderFt);
     }
-    if (opts.watchThrow) {
+    if (opts.watchThrow && !boomAt) {
       const th = opts.watchThrow();
       if (th != null && !view.beer) {
         view.beer = { t0: t, fromX: opts.beerFromX, fromY: WATER_Y - 70 };
       }
       if (view.beer) {
-        const bt = clamp((t - view.beer.t0) / 0.18, 0, 1);
+        const bt = clamp((t - view.beer.t0) / BEER_FLIGHT, 0, 1);
         view.beer.x = view.beer.fromX + (x - view.beer.fromX) * bt;
         view.beer.y = view.beer.fromY + (y - view.beer.fromY) * bt - 40 * Math.sin(Math.PI * bt);
         view.beer.done = bt >= 1;
         const inZone = th >= opts.strikeZone[0] && th <= opts.strikeZone[1];
-        if (view.beer.done && inZone && !boomAt) {
-          boomAt = safeBoom(x, y, opts.defenderFt);
-        }
+        if (view.beer.done && inZone) boomAt = safeBoom(x, y, opts.defenderFt);
       }
     }
     draw();
-    if (boomAt) view.flight = null;
+    // the lure is gone the frame the can connects - the flight stops dead here
+    if (boomAt) { view.flight = null; return true; }
   });
 
-  if (boomAt) { await burst(boomAt.x, boomAt.y); return; }
+  if (boomAt) {
+    view.beer = null;
+    await Promise.all([burst(boomAt.x, boomAt.y), swatted()]);
+    return;
+  }
 
   const hitBoat = Math.abs(opts.toFt - opts.defenderFt) <= tolOf(opts);
   view.flight = null;
@@ -459,9 +467,10 @@ async function flyCast(opts) {
 function safeBoom(x, y, defenderFt) {
   const deckX = xFor(defenderFt);
   const dir = Math.sign(deckX - CASTER_X) || 1;
-  const bx = dir > 0 ? Math.min(x, deckX - 90) : Math.max(x, deckX + 90);
-  const by = Math.min(y, WATER_Y - 90);
+  const bx = dir > 0 ? Math.min(x, deckX - 110) : Math.max(x, deckX + 110);
+  const by = Math.min(y, WATER_Y - 110);   // always up in the air, never on the deck
   Sound.play('can');
+  Sound.cutWhistle();
   view.boom = { x: bx, y: by, beer: true };
   return { x: bx, y: by };
 }
@@ -474,14 +483,24 @@ function tolOf(opts) {
 /* HELL YEAH BROTHER!!! - fires on every hit you land. */
 async function cheer() {
   Sound.play('cheer');
-  view.cheer = { t: 0 };
-  await animate(1400, t => { view.cheer.t = t; draw(); });
+  await banner(['HELL YEAH', 'BROTHER!!!'], '#c8452d', '#ffd25a', 1400);
+}
+
+/* GET THAT OUTTA HERE - a beer can just swatted the dynamite out of the sky. */
+async function swatted() {
+  await banner(['GET THAT', 'OUTTA HERE'], '#1f7a4d', '#ffe08a', 1300);
+}
+
+async function banner(lines, burstColor, textColor, ms) {
+  view.cheer = { t: 0, lines, burstColor, textColor };
+  await animate(ms, t => { if (view.cheer) view.cheer.t = t; draw(); });
   view.cheer = null;
   draw();
 }
 
 async function burst(x, y) {
-  Sound.play('boom');
+  Sound.cutWhistle();
+  Sound.play('explode');
   view.boom = { x, y, r: 0 };
   await animate(700, t => { view.boom.r = 12 + t * 70; view.boom.fade = 1 - t; draw(); });
   view.boom = null;
@@ -489,6 +508,7 @@ async function burst(x, y) {
 }
 
 async function splash(x) {
+  Sound.cutWhistle();
   Sound.play('splash');
   view.splash = { x, r: 0 };
   await animate(600, t => { view.splash.r = t * 34; view.splash.fade = 1 - t; draw(); });
@@ -524,7 +544,7 @@ function draw() {
   if (view.splash) drawSplash(view.splash);
   if (view.boom) drawBoom(view.boom);
   if (view.marker) drawMeter(view.marker);
-  if (view.cheer) drawCheer(view.cheer.t);
+  if (view.cheer) drawBanner(view.cheer);
   if (view.strikeZone && (view.flight || view.windUp != null)) drawZone(view.flight ? view.flight.t : 0, view.strikeZone);
   if (view.windUp != null) drawWindUp(view.windUp);
 }
@@ -571,6 +591,110 @@ function drawWater() {
     }
     ctx.stroke();
   }
+
+  drawFish();
+}
+
+/* ---- the lake's actual residents ---- */
+
+const FISH = Array.from({ length: 10 }, () => newFish(true));
+
+function newFish(anywhere) {
+  const right = Math.random() < 0.5;
+  return {
+    x: anywhere ? Math.random() * W : (right ? -30 : W + 30),
+    y: WATER_Y + 14 + Math.random() * 62,
+    vx: (right ? 1 : -1) * (16 + Math.random() * 30),
+    len: 9 + Math.random() * 9,
+    hue: 26 + Math.random() * 14,
+    phase: Math.random() * 7,
+    jump: null,
+    nextJump: performance.now() + 20000 + Math.random() * 40000,
+  };
+}
+
+let fishClock = performance.now();
+
+function drawFish() {
+  const now = performance.now();
+  const dt = Math.min(0.05, (now - fishClock) / 1000);
+  fishClock = now;
+
+  FISH.forEach((f, i) => {
+    if (f.jump) {
+      // out of the water, over the top, back in with a plop
+      const t = (now - f.jump.t0) / f.jump.dur;
+      if (t >= 1) {
+        splashRing(f.jump.x + f.jump.dx, 1);
+        f.jump = null;
+        f.nextJump = now + 40000 + Math.random() * 40000;
+      } else {
+        const x = f.jump.x + f.jump.dx * t;
+        const y = WATER_Y - Math.sin(Math.PI * t) * f.jump.h;
+        const ang = Math.atan2(-Math.cos(Math.PI * t) * f.jump.h * Math.PI, Math.abs(f.jump.dx));
+        fishShape(x, y, f.len * 1.25, Math.sign(f.jump.dx), f.hue, 1, ang, now);
+        splashRing(f.jump.x, 1 - Math.min(1, t * 4));
+        return;
+      }
+    }
+
+    f.x += f.vx * dt;
+    if (f.x < -40 || f.x > W + 40) Object.assign(f, newFish(false), { nextJump: now + 30000 + Math.random() * 40000 });
+
+    if (now > f.nextJump && !f.jump && f.x > 60 && f.x < W - 60) {
+      f.jump = { t0: now, dur: 850 + Math.random() * 250, x: f.x, dx: Math.sign(f.vx) * (40 + Math.random() * 40), h: 34 + Math.random() * 36 };
+      splashRing(f.x, 1);
+      return;
+    }
+
+    // deeper fish fade into the murk
+    const depth = clamp((f.y - WATER_Y) / 80, 0, 1);
+    fishShape(f.x, f.y + Math.sin(now / 600 + f.phase) * 2, f.len,
+      Math.sign(f.vx), f.hue, 0.72 - depth * 0.3, 0, now + i * 300);
+  });
+}
+
+function fishShape(x, y, len, dir, hue, alpha, angle, now) {
+  const h = len * 0.46;
+  const wag = Math.sin(now / 90) * 0.35;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+  ctx.scale(dir || 1, 1);
+  ctx.fillStyle = `hsl(${hue}, 32%, 62%)`;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, len / 2, h, 0, 0, 7);
+  ctx.fill();
+  ctx.beginPath();                       // tail
+  ctx.moveTo(-len / 2, 0);
+  ctx.lineTo(-len / 2 - len * 0.34, -h * (1 + wag));
+  ctx.lineTo(-len / 2 - len * 0.34, h * (1 - wag));
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,.55)';   // belly + eye
+  ctx.beginPath();
+  ctx.ellipse(len * 0.06, h * 0.35, len * 0.3, h * 0.35, 0, 0, 7);
+  ctx.fill();
+  ctx.fillStyle = '#12232c';
+  ctx.beginPath();
+  ctx.arc(len * 0.3, -h * 0.2, Math.max(0.8, len * 0.06), 0, 7);
+  ctx.fill();
+  ctx.restore();
+}
+
+function splashRing(x, strength) {
+  if (strength <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = 0.5 * strength;
+  ctx.strokeStyle = '#dff1f7';
+  ctx.lineWidth = 1.5;
+  for (let r = 4; r <= 14; r += 5) {
+    ctx.beginPath();
+    ctx.ellipse(x, WATER_Y + 2, r * (2 - strength), r * 0.35 * (2 - strength), 0, 0, 7);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 function drawRuler() {
@@ -862,8 +986,9 @@ function drawMeter(m) {
   ctx.restore();
 }
 
-/* HELL YEAH BROTHER!!! */
-function drawCheer(t) {
+/* HELL YEAH BROTHER!!! / GET THAT OUTTA HERE */
+function drawBanner(b) {
+  const t = b.t;
   const pop = t < 0.18 ? t / 0.18 : 1;
   const out = t > 0.82 ? 1 - (t - 0.82) / 0.18 : 1;
   const scale = 0.6 + pop * 0.45 + Math.sin(t * 22) * 0.02;
@@ -873,7 +998,7 @@ function drawCheer(t) {
   ctx.scale(scale, scale);
 
   // starburst
-  ctx.fillStyle = '#ffd25a';
+  ctx.fillStyle = b.textColor;
   ctx.beginPath();
   for (let i = 0; i < 24; i++) {
     const a = (i / 24) * Math.PI * 2 + t * 1.6;
@@ -881,7 +1006,7 @@ function drawCheer(t) {
     ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r * 0.42);
   }
   ctx.closePath(); ctx.fill();
-  ctx.fillStyle = '#c8452d';
+  ctx.fillStyle = b.burstColor;
   ctx.beginPath();
   for (let i = 0; i < 24; i++) {
     const a = (i / 24) * Math.PI * 2 - t * 1.6;
@@ -892,16 +1017,16 @@ function drawCheer(t) {
 
   ctx.textAlign = 'center';
   ctx.rotate(-0.05);
-  ctx.font = 'italic bold 46px "Trebuchet MS"';
   ctx.lineWidth = 8;
   ctx.strokeStyle = '#2b1206';
-  ctx.strokeText('HELL YEAH', 0, -4);
+  ctx.font = 'italic bold 46px "Trebuchet MS"';
+  ctx.strokeText(b.lines[0], 0, -4);
   ctx.fillStyle = '#fff3c4';
-  ctx.fillText('HELL YEAH', 0, -4);
+  ctx.fillText(b.lines[0], 0, -4);
   ctx.font = 'italic bold 40px "Trebuchet MS"';
-  ctx.strokeText('BROTHER!!!', 0, 38);
-  ctx.fillStyle = '#ffd25a';
-  ctx.fillText('BROTHER!!!', 0, 38);
+  ctx.strokeText(b.lines[1], 0, 38);
+  ctx.fillStyle = b.textColor;
+  ctx.fillText(b.lines[1], 0, 38);
   ctx.restore();
 }
 
