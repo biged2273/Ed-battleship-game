@@ -6,9 +6,9 @@ const MAX_FT = 330;
 const HULL_HP = 5;
 
 const BOATS = [
-  { id: 'skiff',  name: 'The Minnow Jr.', hullFt: 14, tol: 9,  cans: 6, blurb: 'Two guys, one cooler, zero shade.' },
-  { id: 'cruise', name: 'Lake Loafer',    hullFt: 20, tol: 14, cans: 4, blurb: 'Bimini top, radio stuck on classic rock.' },
-  { id: 'barge',  name: 'The Beer Barge', hullFt: 28, tol: 20, cans: 3, blurb: 'Grill on deck. Handles like a dock.' },
+  { id: 'skiff',  name: 'Minnow Junior', hullFt: 14, tol: 9,  cans: 3, blurb: 'Two guys, one cooler, zero shade.' },
+  { id: 'cruise', name: 'Lake Loafer',    hullFt: 20, tol: 14, cans: 5, blurb: 'Bimini top, radio stuck on classic rock.' },
+  { id: 'barge',  name: 'Beer Barge', hullFt: 28, tol: 20, cans: 8, blurb: 'Grill on deck, two coolers, handles like a dock.' },
 ];
 
 const FOE_TAUNTS = [
@@ -191,27 +191,41 @@ function playerMeterPhase(aim) {
     `<div class="dist-row"><button class="dist-btn stop-btn" id="stop">CAST (stop the meter)</button></div>`);
 
   const t0 = performance.now();
+  const offsetAt = now => Math.sin(((now - t0) / 1000) * 3.6) * spread;
+
   function tick(now) {
     if (!running) return;
-    const t = (now - t0) / 1000;
-    const off = Math.sin(t * 3.6) * spread;
-    view.marker = { aim, off, spread };
+    view.marker = { aim, off: offsetAt(now), spread };
     draw();
     requestAnimationFrame(tick);
   }
   requestAnimationFrame(tick);
 
-  document.getElementById('stop').onclick = () => {
+  function stop() {
     if (!running) return;
     running = false;
-    stopped = view.marker.off;
-    const wobble = (Math.random() - 0.5) * 5;
-    const landing = clamp(Math.round(aim + stopped + wobble), 5, MAX_FT);
+    setHotkey(null);
+    // read the meter at the exact instant of the click, not at the last painted frame
+    stopped = offsetAt(performance.now());
+    const landing = clamp(Math.round(aim + stopped), 5, MAX_FT);
     view.marker = { aim, off: stopped, spread, frozen: true };
+    draw();
     el.controls.innerHTML = '<h3>Casting…</h3>';
     resolvePlayerCast(aim, landing);
-  };
+  }
+
+  document.getElementById('stop').onclick = stop;
+  setHotkey(stop);
 }
+
+/* spacebar mirrors whatever timing button is live */
+let hotkey = null;
+function setHotkey(fn) { hotkey = fn; }
+window.addEventListener('keydown', e => {
+  if (e.code !== 'Space' || !hotkey) return;
+  e.preventDefault();
+  hotkey();
+});
 
 async function resolvePlayerCast(aim, landing) {
   const target = S.foe;
@@ -296,15 +310,22 @@ async function foeTurn() {
       : `<div class="dist-row"><button class="dist-btn" disabled>No beers left</button></div>`);
 
   if (canThrow) {
-    document.getElementById('defend').onclick = (e) => {
+    const btn = document.getElementById('defend');
+    const throwCan = () => {
       if (thrownAt != null) return;
-      thrownAt = view.flight ? view.flight.t : 0;
-      e.target.disabled = true;
+      thrownAt = view.flight ? view.flight.t : -1;   // -1 = thrown before the cast even left the rod
+      btn.disabled = true;
+      setHotkey(null);
     };
+    btn.onclick = throwCan;
+    setHotkey(throwCan);
   }
 
-  view.strikeZone = [0.32, 0.7];
+  view.strikeZone = [0.3, 0.72];
+  await windUp(4);
+
   await flyCast({
+    duration: 2400,
     fromX: CASTER_X, toFt: landing,
     defenderFt: S.you.pos,
     watchThrow: () => thrownAt,
@@ -312,6 +333,7 @@ async function foeTurn() {
     beerFromX: xFor(S.you.pos),
   });
 
+  setHotkey(null);
   const intercepted = thrownAt != null && thrownAt >= view.strikeZone[0] && thrownAt <= view.strikeZone[1];
   if (thrownAt != null) S.you.cans--;
 
@@ -352,12 +374,25 @@ function animate(duration, step) {
   });
 }
 
+/* Four seconds of them standing up, spilling a beer and winding up the rod. */
+async function windUp(seconds) {
+  const t0 = performance.now();
+  while (true) {
+    const left = seconds - (performance.now() - t0) / 1000;
+    if (left <= 0) break;
+    view.windUp = left;
+    draw();
+    await new Promise(r => requestAnimationFrame(r));
+  }
+  view.windUp = null;
+}
+
 async function flyCast(opts) {
   const toX = xFor(opts.toFt);
   const rodTip = { x: CASTER_X + 40, y: WATER_Y - 86 };
   let boomAt = null;
 
-  await animate(1500, t => {
+  await animate(opts.duration ?? 1500, t => {
     const x = rodTip.x + (toX - rodTip.x) * t;
     const arc = 150 * Math.sin(Math.PI * t);
     const y = rodTip.y + (WATER_Y - rodTip.y) * t - arc;
@@ -444,7 +479,8 @@ function draw() {
   if (view.splash) drawSplash(view.splash);
   if (view.boom) drawBoom(view.boom);
   if (view.marker) drawMeter(view.marker);
-  if (view.strikeZone && view.flight) drawZone(view.flight.t, view.strikeZone);
+  if (view.strikeZone && (view.flight || view.windUp != null)) drawZone(view.flight ? view.flight.t : 0, view.strikeZone);
+  if (view.windUp != null) drawWindUp(view.windUp);
 }
 
 function drawSky() {
@@ -714,6 +750,20 @@ function drawMeter(m) {
   ctx.restore();
 }
 
+function drawWindUp(left) {
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.fillStyle = 'rgba(6,17,26,.78)';
+  roundRect(W / 2 - 190, 24, 380, 62, 10); ctx.fill();
+  ctx.fillStyle = '#ffd25a';
+  ctx.font = 'bold 20px "Trebuchet MS"';
+  ctx.fillText(`THEY ARE WINDING UP… ${Math.ceil(left)}`, W / 2, 50);
+  ctx.font = '14px "Trebuchet MS"';
+  ctx.fillStyle = '#9fc0cd';
+  ctx.fillText('get a beer in your hand — space or the button throws it', W / 2, 74);
+  ctx.restore();
+}
+
 function drawZone(t, zone) {
   const y = H - 34;
   const x0 = 200, x1 = W - 200;
@@ -773,7 +823,7 @@ function weightedPick(items, weights) {
 
 /* idle water animation so the lake never looks frozen */
 (function idle() {
-  if (view && !view.flight) draw();
+  if (view && !view.flight && !view.marker && view.windUp == null) draw();
   requestAnimationFrame(idle);
 })();
 
